@@ -1,36 +1,3 @@
-/*
- * ldpreloadhook - a quick open/close/ioctl/read/write/free/strcmp/strncmp symbol hooker
- * Copyright (C) 2012-2013 Pau Oliva Fora <pof@eslack.org>
- *
- * Based on vsound 0.6 source code:
- *   Copyright (C) 2004 Nathan Chantrell <nsc@zorg.org>
- *   Copyright (C) 2003 Richard Taylor <r.taylor@bcs.org.uk>
- *   Copyright (C) 2000,2001 Erik de Castro Lopo <erikd@zip.com.au>
- *   Copyright (C) 1999 James Henstridge <james@daa.com.au>
- * Based on esddsp utility that is part of esound:
- *   Copyright (C) 1998, 1999 Manish Singh <yosh@gimp.org>
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * 1) Compile:
- *   gcc -fPIC -c -o hook.o hook.c
- *   gcc -shared -o hook.so hook.o -ldl
- * 2) Usage:
- *   LD_PRELOAD="./hook.so" command
- *   LD_PRELOAD="./hook.so" SPYFILE="/file/to/spy" command
- *   LD_PRELOAD="./hook.so" SPYFILE="/file/to/spy" DELIMITER="***" command
- * to spy the content of buffers free'd by free(), set the environment
- * variable SPYFREE, for example:
- *   LD_PRELOAD="./hook.so" SPYFREE=1 command
- * to spy the strings compared using strcmp(), set the environment
- * variable SPYSTR, for example:
- *   LD_PRELOAD="./hook.so" SPYSTR=1 command
- * to spy memcpy() buffers set the env variable SPYMEM
- */
-
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +8,9 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <linux/fb.h>
+#include "tegrafb.h"
+
 
 int g_obvio=0;
 #define DPRINTF(format, args...)	if (!g_obvio) { g_obvio=1; fprintf(stderr, format, ## args); g_obvio=0; }
@@ -51,23 +21,14 @@ int g_obvio=0;
 
 #define REAL_LIBC RTLD_NEXT
 
-#ifdef __FreeBSD__
-typedef unsigned long request_t;
-#else
 typedef int request_t;
-#endif
 
 typedef void (*sighandler_t)(int);
 
 static int data_w_fd = -1, hook_fd = -1, data_r_fd = -1;
 
-#ifdef __ANDROID__
-static const char *data_w_file = "/data/local/tmp/write_data.bin";
-static const char *data_r_file = "/data/local/tmp/read_data.bin";
-#else
 static const char *data_w_file = "/tmp/write_data.bin";
 static const char *data_r_file = "/tmp/read_data.bin"; 
-#endif
 
 static void _libhook_init() __attribute__ ((constructor));
 static void _libhook_init() {   
@@ -75,6 +36,7 @@ static void _libhook_init() {
 	//unsetenv("LD_PRELOAD");
 	printf("[] Hooking!\n");
 }
+
 
 ssize_t write (int fd, const void *buf, size_t count);
 void free (void *buf);
@@ -126,7 +88,7 @@ int strcmp(const char *s1, const char *s2) {
 		func_strcmp = (int (*) (const char*, const char*)) dlsym (REAL_LIBC, "strcmp");
 
 	if (getenv("SPYSTR") != NULL) {
-		DPRINTF ("HOOK: strcmp( \"%s\" , \"%s\" )\n", s1, s2);
+		//DPRINTF ("HOOK: strcmp( \"%s\" , \"%s\" )\n", s1, s2);
 	}
 
 	retval = func_strcmp (s1, s2);
@@ -143,7 +105,7 @@ int strncmp(const char *s1, const char *s2, size_t n) {
 		func_strncmp = (int (*) (const char*, const char*, size_t)) dlsym (REAL_LIBC, "strncmp");
 
 	if (getenv("SPYSTR") != NULL) {
-		DPRINTF ("HOOK: strncmp( \"%s\" , \"%s\" , %zd )\n", s1, s2, n);
+		//DPRINTF ("HOOK: strncmp( \"%s\" , \"%s\" , %zd )\n", s1, s2, n);
 	}
 
 	retval = func_strncmp (s1, s2, n);
@@ -172,11 +134,44 @@ int close (int fd){
 	return retval;
 }
 
+void decode_ioctl(request_t request, void *argp)
+{
+       if(request == 0x4600 || request == 0x4601) {
+       		struct fb_var_screeninfo *arg = (struct fb_var_screeninfo *)argp;
+       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (xres=[%02X], yres=[%02X], )\n",  arg->xres, arg->yres);
+       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (xres_v=[%02X], yres_v=[%02X], )\n",  arg->xres_virtual, arg->yres_virtual);
+       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (x_off=[%02X], y_off=[%02X], )\n",  arg->xoffset, arg->yoffset);
+       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (x_height=[%02X], y_width=[%02X], )\n",  arg->height, arg->width);
+       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (sync=[%02X], vmode=[%02X], )\n",  arg->sync, arg->vmode);
+       } 
+       else if(request == 0x4602) {
+       		struct fb_fix_screeninfo *arg = (struct fb_var_screeninfo *)argp;
+       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (smem_start=[%02X], smem_len=[%02X], )\n",  arg->smem_start, arg->smem_len);
+       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (type=[%02X], type_aux=[%02X], )\n",  arg->type, arg->type_aux);
+       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (xpanstep=[%02X], ypanstep=[%02X], )\n",  arg->xpanstep, arg->ypanstep);
+       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (mmio_start=[%02X], mmio_len=[%02X], )\n",  arg->mmio_start, arg->mmio_len);
+	}
+       else if(request == 0x4642) {
+       		struct tegra_fb_modedb *arg = (struct tegra_fb_modedb *)argp;
+		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (xres=[%02X], yres=[%02X], )\n",  arg->modedb->xres, arg->modedb->yres);
+       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (xres_v=[%02X], yres_v=[%02X], )\n",  arg->modedb->xres_virtual, arg->modedb->yres_virtual);
+       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (x_off=[%02X], y_off=[%02X], )\n",  arg->modedb->xoffset, arg->modedb->yoffset);
+       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (x_height=[%02X], y_width=[%02X], )\n",  arg->modedb->height, arg->modedb->width);
+       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (sync=[%02X], vmode=[%02X], )\n",  arg->modedb->sync, arg->modedb->vmode);
+		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (modedb_len=[%02X], )\n", arg->modedb_len);
+	}
+       else if(request == 0x4611) {
+       		unsigned long *arg = (unsigned long *)argp;
+		DPRINTF ("DECODE: ioctl FBIO_BLANK (modedb_len=[%02X], )\n", arg);
+	}
+}
+
 int ioctl (int fd, request_t request, ...){	
 
 	static int (*func_ioctl) (int, request_t, void *) = NULL;
 	va_list args;
 	void *argp;
+        int ret=0;
 
 	setenv("SPYFILE", "spyfile", 0);
 	char *spy_file = getenv("SPYFILE");
@@ -189,13 +184,17 @@ int ioctl (int fd, request_t request, ...){
 
 	if (fd != hook_fd) {
 		DPRINTF ("HOOK: ioctl (fd=%d, request=%p, argp=%p [%02X])\n", fd, request, argp);
-		return func_ioctl (fd, request, argp);
+		//decode_ioctl(request, argp);
+		ret = func_ioctl (fd, request, argp);
+		decode_ioctl(request, argp);
+		return ret;
 	} 
 
 	DPRINTF ("HOOK: ioctl on hooked file %s (fd=%d)\n", spy_file, fd);
 
 	/* Capture the ioctl() calls */
-	return func_ioctl (hook_fd, request, argp);
+	ret = func_ioctl (hook_fd, request, argp);
+        return ret;
 }
 
 ssize_t read (int fd, void *buf, size_t count){	
@@ -214,11 +213,11 @@ ssize_t read (int fd, void *buf, size_t count){
 		func_write = (ssize_t (*) (int, const void*, size_t)) dlsym (REAL_LIBC, "write");
 
 	if (fd != hook_fd) {
-		DPRINTF ("HOOK: read %zd bytes from file descriptor (fd=%d)\n", count, fd);
+		//DPRINTF ("HOOK: read %zd bytes from file descriptor (fd=%d)\n", count, fd);
 		return func_read (fd, buf, count);
 	}
 
-	DPRINTF ("HOOK: read %zd bytes from hooked file %s (fd=%d)\n", count, spy_file, fd);
+	//DPRINTF ("HOOK: read %zd bytes from hooked file %s (fd=%d)\n", count, spy_file, fd);
 
 	retval = func_read(fd, buf, count);
 
@@ -243,11 +242,11 @@ ssize_t write (int fd, const void *buf, size_t count){
 		func_write = (ssize_t (*) (int, const void*, size_t)) dlsym (REAL_LIBC, "write");
 
 	if (fd != hook_fd) {
-		DPRINTF ("HOOK: write %zd bytes to file descriptor (fd=%d)\n", count, fd);
+		//DPRINTF ("HOOK: write %zd bytes to file descriptor (fd=%d)\n", count, fd);
 		return func_write (fd, buf, count);
 	}
 
-	DPRINTF ("HOOK: write %zd bytes to hooked file %s (fd=%d)\n", count, spy_file, fd);
+	//DPRINTF ("HOOK: write %zd bytes to hooked file %s (fd=%d)\n", count, spy_file, fd);
 
 	func_write (hook_fd, buf, count);
 	retval = func_write (data_w_fd, buf, count);
@@ -278,7 +277,7 @@ void free (void *ptr){
 			}
 
 			if (strlen(tmp_buf) != 0) 
-				DPRINTF("HOOK: free( ptr[%zd]=%s )\n",strlen(tmp_buf), tmp_buf);
+				;//DPRINTF("HOOK: free( ptr[%zd]=%s )\n",strlen(tmp_buf), tmp_buf);
 		}
 	}
 
@@ -287,7 +286,7 @@ void free (void *ptr){
 
 void *memcpy(void *dest, const void *src, size_t n) {
 
-	DPRINTF("HOOK: memcpy( dest=%p , src=%p, size=%zd )\n", dest, src, n);
+	//DPRINTF("HOOK: memcpy( dest=%p , src=%p, size=%zd )\n", dest, src, n);
 
 	static void (*func_memcpy) (void*, const void *, size_t) = NULL;
 	if (! func_memcpy)
@@ -301,18 +300,18 @@ void *memcpy(void *dest, const void *src, size_t n) {
 		char tmp_buf[1025] = {0};
 		size_t total = 0;
 
-		DPRINTF("      memcpy buffer: ");
+		//DPRINTF("      memcpy buffer: ");
 		while (total < n) {
 			tmp_buf[total] = *tmp;
-			DPRINTF("%02X ", tmp_buf[total]);
+			//DPRINTF("%02X ", tmp_buf[total]);
 			total++;
 			if (total == 1024)
 				break;
 			tmp++;
 		}
 
-		DPRINTF("\n");
-		DPRINTF("      memcpy str: [%zd]=%s )\n",strlen(tmp_buf), tmp_buf);
+		//DPRINTF("\n");
+		//DPRINTF("      memcpy str: [%zd]=%s )\n",strlen(tmp_buf), tmp_buf);
 	}
 }
 
@@ -324,7 +323,7 @@ int puts(const char *s) {
 	if (! func_puts)
 		func_puts = (int (*) (const char*)) dlsym (REAL_LIBC, "puts");
 
-	DPRINTF ("HOOK: puts( \"%s\" )\n", s);
+	//DPRINTF ("HOOK: puts( \"%s\" )\n", s);
 
 	retval = func_puts (s);
 	return retval;
@@ -337,7 +336,7 @@ uid_t getuid(void) {
 		func_getuid = (uid_t (*) (void)) dlsym (REAL_LIBC, "getuid");
 
 	uid_t retval = func_getuid();
-	DPRINTF("HOOK: getuid() returned %d\n", retval);
+	//DPRINTF("HOOK: getuid() returned %d\n", retval);
 
 	return retval;
 }
@@ -352,7 +351,7 @@ int system(const char *command) {
 
 	retval = func_system (command);
 
-	DPRINTF ("HOOK: system( \"%s\" ) returned %d\n", command, retval);
+	//DPRINTF ("HOOK: system( \"%s\" ) returned %d\n", command, retval);
 
 	return retval;
 
@@ -364,7 +363,7 @@ void *malloc(size_t size) {
 	if (! func_malloc)
 		func_malloc = (void (*) (size_t)) dlsym (REAL_LIBC, "malloc");
 
-	DPRINTF("HOOK: malloc( size=%zd )\n", size);
+	//DPRINTF("HOOK: malloc( size=%zd ) \n", size);
 	func_malloc(size);
 }
 
@@ -374,7 +373,7 @@ void abort(void) {
 	static void (*func_abort) (void) = NULL;
 	if (! func_abort)
 		func_abort = (void (*) (void)) dlsym (REAL_LIBC, "abort");
-	DPRINTF("HOOK: abort()\n");
+	//DPRINTF("HOOK: abort()\n");
 	func_abort();
 }
 
@@ -388,7 +387,7 @@ int chmod(const char *path, mode_t mode) {
 
 	retval = func_chmod (path, mode);
 
-	DPRINTF ("HOOK: chmod( \"%s\", mode=%o ) returned %d\n", path, mode, retval);
+	//DPRINTF ("HOOK: chmod( \"%s\", mode=%o ) returned %d\n", path, mode, retval);
 
 	return retval;
 
@@ -403,7 +402,7 @@ sighandler_t bsd_signal(int signum, sighandler_t handler) {
 
 	sighandler_t retval = func_bsd_signal (signum, handler);
 
-	DPRINTF ("HOOK: bsd_signal \"%d\" \n", signum);
+	//DPRINTF ("HOOK: bsd_signal \"%d\" \n", signum);
 	return retval;
 
 }
@@ -418,7 +417,7 @@ int unlink(const char *pathname) {
 
 	retval = func_unlink (pathname);
 
-	DPRINTF ("HOOK: unlink( \"%s\" ) returned %d\n", pathname, retval);
+	//DPRINTF ("HOOK: unlink( \"%s\" ) returned %d\n", pathname, retval);
 
 	return retval;
 
@@ -431,7 +430,7 @@ pid_t fork(void) {
 		func_fork = (pid_t (*) (void)) dlsym (REAL_LIBC, "fork");
 
 	pid_t retval = func_fork();
-	DPRINTF("HOOK: fork() returned %d\n", retval);
+	//DPRINTF("HOOK: fork() returned %d\n", retval);
 
 	return retval;
 }
@@ -442,23 +441,11 @@ void srand48(long int seedval) {
 	if (! func_srand48)
 		func_srand48 = (void (*) (long int)) dlsym (REAL_LIBC, "srand48");
 
-	DPRINTF("HOOK: srand48( size=%ld )\n", seedval);
+	//DPRINTF("HOOK: srand48( size=%ld )\n", seedval);
 	func_srand48(seedval);
 
 }
 
-#if 0
-void *memset(void *s, int c, size_t n) {
-	DPRINTF("HOOK: memset()\n");
-
-	static void (*func_memset) (void*, int, size_t) = NULL;
-	if (! func_memset)
-		func_memset = (void (*) (void*, int, size_t)) dlsym (REAL_LIBC, "memset");
-
-	DPRINTF("HOOK: memset( s=%p , c=%d, n=%zd )\n", s, c, n);
-	func_memset(s,c,n);
-}
-# endif
 
 time_t time(time_t *t) {
 
@@ -468,7 +455,7 @@ time_t time(time_t *t) {
 	if (! func_time)
 		func_time = (time_t (*) (time_t *)) dlsym (REAL_LIBC, "time");
 
-	DPRINTF ("HOOK: time( \"%d\" )\n", t);
+	//DPRINTF ("HOOK: time( \"%d\" )\n", t);
 	retval = func_time (t);
 	return retval;
 }
@@ -481,7 +468,7 @@ long int lrand48(void) {
 		func_lrand48 = (long int (*) (void)) dlsym (REAL_LIBC, "lrand48");
 
 	long int retval = func_lrand48();
-	DPRINTF("HOOK: lrand48() returned %ld\n", retval);
+	//DPRINTF("HOOK: lrand48() returned %ld\n", retval);
 
 	return retval;
 }
@@ -501,7 +488,7 @@ size_t strlen(const char *s) {
                 func_strncmp = (int (*) (const char*, const char*, size_t)) dlsym (REAL_LIBC, "strncmp");
 
 	if (func_strncmp (s, "spyfile", 7) != 0){
-		DPRINTF ("HOOK: strlen( \"%s\" ) returned %d\n", s, retval);
+		//DPRINTF ("HOOK: strlen( \"%s\" ) returned %d\n", s, retval);
 	}
 
 	return retval;
@@ -516,7 +503,7 @@ int raise(int sig) {
 		func_raise = (int (*) (int)) dlsym (REAL_LIBC, "raise");
 
 	retval = func_raise (sig);
-	DPRINTF ("HOOK: raise( \"%d\" ) returned %d\n", sig, retval);
+	//DPRINTF ("HOOK: raise( \"%d\" ) returned %d\n", sig, retval);
 
 	return retval;
 }
