@@ -138,27 +138,27 @@ void decode_ioctl(request_t request, void *argp)
 {
        if(request == 0x4600 || request == 0x4601) {
        		struct fb_var_screeninfo *arg = (struct fb_var_screeninfo *)argp;
-       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (xres=[%02X], yres=[%02X], )\n",  arg->xres, arg->yres);
-       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (xres_v=[%02X], yres_v=[%02X], )\n",  arg->xres_virtual, arg->yres_virtual);
-       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (x_off=[%02X], y_off=[%02X], )\n",  arg->xoffset, arg->yoffset);
-       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (x_height=[%02X], y_width=[%02X], )\n",  arg->height, arg->width);
-       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (sync=[%02X], vmode=[%02X], )\n",  arg->sync, arg->vmode);
+       		DPRINTF ("DECODE: ioctl FBIOGET_VSCREENINFO (xres=[%d], yres=[%d]);",  arg->xres, arg->yres);
+       		DPRINTF ("(xres_v=[%d], yres_v=[%d]);",  arg->xres_virtual, arg->yres_virtual);
+       		DPRINTF ("(x_off=[%d], y_off=[%d]);",  arg->xoffset, arg->yoffset);
+       		DPRINTF ("(x_height=[%d], y_width=[%d]);",  arg->height, arg->width);
+       		DPRINTF ("(sync=[%d], vmode=[%d])\n",  arg->sync, arg->vmode);
        } 
        else if(request == 0x4602) {
        		struct fb_fix_screeninfo *arg = (struct fb_var_screeninfo *)argp;
-       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (smem_start=[%02X], smem_len=[%02X], )\n",  arg->smem_start, arg->smem_len);
-       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (type=[%02X], type_aux=[%02X], )\n",  arg->type, arg->type_aux);
-       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (xpanstep=[%02X], ypanstep=[%02X], )\n",  arg->xpanstep, arg->ypanstep);
-       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (mmio_start=[%02X], mmio_len=[%02X], )\n",  arg->mmio_start, arg->mmio_len);
+       		DPRINTF ("DECODE: ioctl FBIOGET_FSCREENINFO (smem_start=[%02X], smem_len=[%02X]);",  arg->smem_start, arg->smem_len);
+       		DPRINTF ("(type=[%02X], type_aux=[%02X]);",  arg->type, arg->type_aux);
+       		DPRINTF ("(xpanstep=[%02X], ypanstep=[%02X]);",  arg->xpanstep, arg->ypanstep);
+       		DPRINTF ("(mmio_start=[%02X], mmio_len=[%02X])\n",  arg->mmio_start, arg->mmio_len);
 	}
        else if(request == 0x4642) {
        		struct tegra_fb_modedb *arg = (struct tegra_fb_modedb *)argp;
-		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (xres=[%02X], yres=[%02X], )\n",  arg->modedb->xres, arg->modedb->yres);
-       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (xres_v=[%02X], yres_v=[%02X], )\n",  arg->modedb->xres_virtual, arg->modedb->yres_virtual);
-       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (x_off=[%02X], y_off=[%02X], )\n",  arg->modedb->xoffset, arg->modedb->yoffset);
-       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (x_height=[%02X], y_width=[%02X], )\n",  arg->modedb->height, arg->modedb->width);
-       		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (sync=[%02X], vmode=[%02X], )\n",  arg->modedb->sync, arg->modedb->vmode);
-		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (modedb_len=[%02X], )\n", arg->modedb_len);
+		DPRINTF ("DECODE: ioctl FBIO_TEGRA_GET_MODEDB (xres=[%02X], yres=[%02X]);",  arg->modedb->xres, arg->modedb->yres);
+       		DPRINTF ("(xres_v=[%02X], yres_v=[%02X]);",  arg->modedb->xres_virtual, arg->modedb->yres_virtual);
+       		DPRINTF ("(x_off=[%02X], y_off=[%02X]);",  arg->modedb->xoffset, arg->modedb->yoffset);
+       		DPRINTF ("(x_height=[%02X], y_width=[%02X]);",  arg->modedb->height, arg->modedb->width);
+       		DPRINTF ("(sync=[%02X], vmode=[%02X]);",  arg->modedb->sync, arg->modedb->vmode);
+		DPRINTF ("(modedb_len=[%02X])\n", arg->modedb_len);
 	}
        else if(request == 0x4611) {
        		unsigned long *arg = (unsigned long *)argp;
@@ -183,9 +183,11 @@ int ioctl (int fd, request_t request, ...){
 	va_end (args);
 
 	if (fd != hook_fd) {
+		DPRINTF ("HOOK: before ioctl call\n");
 		DPRINTF ("HOOK: ioctl (fd=%d, request=%p, argp=%p [%02X])\n", fd, request, argp);
-		//decode_ioctl(request, argp);
+		decode_ioctl(request, argp);
 		ret = func_ioctl (fd, request, argp);
+		DPRINTF ("HOOK: After ioctl call\n");
 		decode_ioctl(request, argp);
 		return ret;
 	} 
